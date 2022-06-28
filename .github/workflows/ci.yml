@@ -1,0 +1,22 @@
+name: ci
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install OCaml
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes opam
+          opam init --disable-sandboxing --auto-setup
+      - name: Install opam dependencies
+        run: |
+          opam install --yes stdcompat redirect menhir cmdliner dune
+      - name: Build
+        run: |
+          opam exec dune build
+      - name: Test
+        run: |
+          opam exec dune runtest .

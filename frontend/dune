@@ -1,0 +1,10 @@
+(executable
+  (name frontend)
+  (public_name lazypp)
+; Warning 9: unbound labels
+; Warning 27: unused parameter
+; Warning 32: unused value
+; Warning 34: unused type
+; Warning 37: unused constructor
+  (flags -open Stdcompat -w +9+27+32+34+37)
+  (libraries unix stdcompat cmdliner lazypp))

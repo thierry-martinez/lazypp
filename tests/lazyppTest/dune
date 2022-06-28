@@ -1,0 +1,3 @@
+(library
+  (name lazyppTest)
+  (libraries lazypp))

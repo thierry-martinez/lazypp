@@ -1,0 +1,15 @@
+(library
+  (name lazypp)
+  (public_name lazypp)
+; Warning 8: partial match
+; Warning 9: unbound labels
+; Warning 27: unused parameter
+; Warning 32: unused value
+; Warning 34: unused type
+; Warning 37: unused constructor
+  (flags -open Stdcompat -w @8+9+27+32+34+37)
+  (modules_without_implementation locS errS astS outputS dataStructuresS configS warnS)
+  (libraries unix stdcompat redirect))
+
+(ocamllex lexer)
+(menhir (modules parser) (flags --explain))

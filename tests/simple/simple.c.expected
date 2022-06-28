@@ -1,0 +1,28 @@
+#define A 1
+( 1 )
+#define B(x) {x}
+{bla}
+
+{bla}
+
+OK
+
+#ifdef unknown /* comment */
+maybe
+#endif
+
+OK
+
+#define __GLIBC_USE(X) __GLIBC_USE_ ## X
+
+#if __GLIBC_USE_IEC_60559_BFP_EXT || __GLIBC_USE_ISOC2X
+OK
+#endif
+
+#define answer 42
+
+  B
+
+#if defined __USE_GNU || defined __STDC_WANT_IEC_60559_FUNCS_EXT__
+  1
+#endif

@@ -1,0 +1,4 @@
+(test
+  (name line_numbers)
+  (deps (glob_files *.c) (glob_files *.c.expected))
+  (libraries lazyppTest))
