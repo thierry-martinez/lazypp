@@ -1,4 +1,5 @@
 (test
   (name line_numbers)
   (deps (glob_files *.c) (glob_files *.c.expected))
-  (libraries lazyppTest))
+  (flags -open Stdcompat -w @8+9+27+32+34+37)
+  (libraries stdcompat lazyppTest))

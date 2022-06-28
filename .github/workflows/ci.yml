@@ -13,6 +13,7 @@ jobs:
           opam init --disable-sandboxing --auto-setup
       - name: Install opam dependencies
         run: |
+          opam pin add --yes --no-action https://github.com/thierry-martinez/stdcompat.git
           opam install --yes stdcompat redirect menhir cmdliner dune
       - name: Build
         run: |
