@@ -1,6 +1,9 @@
 module type S = sig
   type unlocated =
-    | GCCFailed of Unix.process_status
+    | External_command_failed of {
+        command : string;
+        status : Unix.process_status;
+      }
 
   type located =
     | Invalid_preprocessing_directive of string

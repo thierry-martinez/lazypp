@@ -53,24 +53,24 @@ let preload_file (config : Config.t) (handlers : Output.handlers)
   let ast = Parse.file filename in
   preload_ast config handlers env ast
 
-let with_open_process_args program args f =
-  let pair = Unix.open_process_args program args in
+let with_open_process command f =
+  let pair = Unix.open_process command in
   let result = f pair in
   match Unix.close_process pair with
   | WEXITED 0 -> result
-  | status -> Err.raise_unlocated (GCCFailed status)
+  | status -> Err.raise_unlocated (External_command_failed { command; status })
 
-let with_open_process_args_full program args f =
+let with_open_process_full command f =
   let triplet =
-    Unix.open_process_args_full program args (Unix.environment ()) in
+    Unix.open_process_full command (Unix.environment ()) in
   let result = f triplet in
   match Unix.close_process_full triplet with
   | WEXITED 0 -> result
-  | status -> Err.raise_unlocated (GCCFailed status)
+  | status -> Err.raise_unlocated (External_command_failed { command; status })
 
 let preload_gcc (config : Config.t) (handlers : Output.handlers)
       (env : Output.env) : Output.env =
-  with_open_process_args "gcc" [| "gcc"; "-dM"; "-E"; "-" |]
+  with_open_process "gcc -dM -E -"
     (fun (in_channel, out_channel) ->
       close_out out_channel;
       let ast = Parse.channel ~filename:"<gcc>" in_channel in
@@ -88,7 +88,7 @@ let rec extract_include_path_rec accu in_channel =
       extract_include_path_rec accu in_channel
 
 let get_gcc_include_path () =
-  with_open_process_args_full "gcc" [| "gcc"; "-E"; "-Wp,-v"; "-" |]
+  with_open_process_full "gcc -E -Wp,-v -"
     (fun (_in_channel, out_channel, err_channel) ->
       close_out out_channel;
       extract_include_path_rec [] err_channel)

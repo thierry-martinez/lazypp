@@ -25,8 +25,9 @@ let format_process_status fmt (ps : Unix.process_status) =
 
 let format_unlocated fmt (d : unlocated) =
   match d with
-  | GCCFailed process_status ->
-      Format.fprintf fmt "GCC failed: %a" format_process_status process_status
+  | External_command_failed { command; status } ->
+      Format.fprintf fmt "Command \"%s\" failed: %a" command
+        format_process_status status
 
 let format_located fmt (d : located) =
   match d with
