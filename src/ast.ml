@@ -73,15 +73,17 @@ let rec single_whitespace_rec accu
   | [] -> List.rev accu
   | { v = Whitespace _; _ } :: ({ v = Whitespace _; _ } :: _ as tl) ->
       single_whitespace_rec accu tl
+  | { v = Whitespace _; range } :: tl ->
+      single_whitespace_rec (Loc.l ~range (Whitespace " ") :: accu) tl
   | hd :: tl -> single_whitespace_rec (hd :: accu) tl
 
 let single_whitespace (replacement_list : replacement_list) =
   single_whitespace_rec [] replacement_list
 
-let string_of_replacement_list replacement_list =
+let string_of_replacement_list ~preserve_whitespace replacement_list =
   String.concat "" (List.map (fun (token : replacement_token Loc.t) ->
-    string_of_replacement_token ~preserve_whitespace:false token.v)
-    (single_whitespace (trim replacement_list)))
+    string_of_replacement_token ~preserve_whitespace token.v)
+    replacement_list)
 
 let remove_whitespace replacement_list =
   replacement_list |> List.filter (fun (token : replacement_token Loc.t) ->

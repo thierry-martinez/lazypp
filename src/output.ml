@@ -117,6 +117,12 @@ type substitute_token =
   | Placeholder
   | Token of Ast.replacement_token Loc.t
 
+let rec substitute_skip_whitespace (replacement_list : substitute_token list) =
+  match replacement_list with
+  | (Placeholder | Token { v = Whitespace _; _ }) :: tl ->
+      substitute_skip_whitespace tl
+  | _ -> replacement_list
+
 let replacement_tokens_of_string s : Ast.replacement_token list option =
   let lexbuf = Lexing.from_string s in
   try
@@ -130,12 +136,11 @@ let concat_token range (lhs : Ast.replacement_token)
   let lhs' = Ast.string_of_replacement_token ~preserve_whitespace:true lhs in
   let rhs' = Ast.string_of_replacement_token ~preserve_whitespace:true rhs in
   let s = lhs' ^ rhs' in
-  let lexbuf = Lexing.from_string s in
   match replacement_tokens_of_string s with
   | Some [token] -> token
   | _ ->
       Warn.signal ~range (Invalid_token_concatenation { lhs; rhs });
-      Whitespace ""
+      Whitespace " "
 
 let concat_substitute_token lhs rhs =
   match lhs, rhs with
@@ -148,9 +153,16 @@ let concat_substitute_token lhs rhs =
 let rec concat_hash_hash accu rev_list =
   match rev_list with
   | [] -> accu
-  | rhs :: Token { v = Hash_hash; _ } :: lhs :: tl ->
+  | Token { v = Hash_hash; _ } :: tl ->
+      let rhs, accu =
+        match substitute_skip_whitespace accu with
+        | [] -> assert false
+        | hd :: tl -> hd, tl in
+      let lhs, tl =
+        match substitute_skip_whitespace tl with
+        | [] -> assert false
+        | hd :: tl -> hd, tl in
       concat_hash_hash (concat_substitute_token lhs rhs :: accu) tl
-  | Token { v = Hash_hash; _ } :: _ -> assert false
   | Placeholder :: tl -> concat_hash_hash accu tl
   | Token token :: tl -> concat_hash_hash (Token token :: accu) tl
 
@@ -194,8 +206,9 @@ let rec substitute_arguments_rec
                   Err.raise_located ~range Hash_not_followed_by_parameter
               | replacement_list ->
                   let s =
-                    Ast.string_of_replacement_list
-                      (remove_marks replacement_list) in
+                    Ast.string_of_replacement_list ~preserve_whitespace:false
+                      (Ast.single_whitespace
+                        (Ast.trim (remove_marks replacement_list))) in
                   let token =
                     Token { range; v = String_literal (Warn.quote s) } in
                   substitute_arguments_rec argument_map (token :: accu) tl
@@ -281,8 +294,7 @@ let rec replace_macros_rec ~(force_expansion : bool) list_range
                       | Ast { v = ast; _ } ->
                           begin match ast.parameters with
                           | None ->
-                              let list =
-                                Ast.remove_whitespace ast.replacement_list.v in
+                              let list = Ast.trim ast.replacement_list.v in
                               let expansion_context =
                                 ExpansionContext.add define.occurrence
                                   hd.context in
@@ -297,8 +309,7 @@ let rec replace_macros_rec ~(force_expansion : bool) list_range
                                     substitute_arguments ~range:list_range
                                       hd.context define.occurrence
                                       parameters.v.list arguments
-                                      (Ast.remove_whitespace
-                                        ast.replacement_list.v) in
+                                      (Ast.trim ast.replacement_list.v) in
                                   let expansion_context =
                                     ExpansionContext.add define.occurrence
                                       hd.context in
@@ -718,7 +729,7 @@ let signal_message context env constructor directive_text
     begin
       let list = make_token_list ExpansionContext.empty message.v in
       let message_str =
-        Ast.string_of_replacement_list
+        Ast.string_of_replacement_list ~preserve_whitespace:true
           (remove_marks (List.map (fun token -> token.token) list)) in
       Warn.signal ~range:message.range (constructor message_str);
     end;
@@ -774,9 +785,19 @@ let output_pragma context env directive_text
 
 let default_handlers = { output_pragma }
 
+let remove_parameter env (parameter : Ast.parameter) =
+  Identifier.Map.remove parameter.identifier.v env
+
 let output_define context env directive_text (define : Ast.define) :
       replacement_token list =
   let range = define.identifier.range in
+  let env =
+    match define.parameters with
+    | None -> env
+    | Some parameters ->
+        { define_map =
+            List.fold_left remove_parameter env.define_map parameters.v.list
+        } in
   (Token { range; v = Other directive_text } : replacement_token) ::
   Token { range; v = Identifier define.identifier.v } ::
     begin match define.parameters with

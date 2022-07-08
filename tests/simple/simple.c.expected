@@ -26,3 +26,7 @@ OK
 #if defined __USE_GNU || defined __STDC_WANT_IEC_60559_FUNCS_EXT__
   1
 #endif
+
+#define X 1
+
+#define Y(A) {A}

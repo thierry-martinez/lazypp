@@ -21,7 +21,7 @@ let format_cannot_evaluate_condition fmt
   match error with
   | Parse_error { expression } ->
       Format.fprintf fmt "cannot parse the expression \"%s\""
-        (Ast.string_of_replacement_list expression)
+        (Ast.string_of_replacement_list ~preserve_whitespace:true expression)
   | Unknown_macros macros ->
       let macros = Identifier.Set.elements macros in
       begin match macros with
@@ -54,7 +54,7 @@ let format_desc fmt (d : desc) =
   | Include_not_followed_by_string_literal_or_less { expression } ->
       Format.fprintf fmt
         "'#include' is not followed by a string literal or '<': %s"
-        (Ast.string_of_replacement_list expression)
+        (Ast.string_of_replacement_list  ~preserve_whitespace:true expression)
   | Invalid_token_concatenation { lhs; rhs } ->
       Format.fprintf fmt
         "Invalid token concatenation between '%s' and '%s'"
