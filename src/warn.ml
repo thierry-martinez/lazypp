@@ -55,6 +55,11 @@ let format_desc fmt (d : desc) =
       Format.fprintf fmt
         "'#include' is not followed by a string literal or '<': %s"
         (Ast.string_of_replacement_list expression)
+  | Invalid_token_concatenation { lhs; rhs } ->
+      Format.fprintf fmt
+        "Invalid token concatenation between '%s' and '%s'"
+        (Ast.string_of_replacement_token ~preserve_whitespace:true lhs)
+        (Ast.string_of_replacement_token ~preserve_whitespace:true rhs)
   | Unimplemented message ->
       Format.fprintf fmt "Unimplemented: %s" message
 

@@ -12,6 +12,7 @@
 %token <Identifier.t> Defined
 %start <Ast.preprocessing_file> preprocessing_file
 %start <Ast.constant_expression> constant_expression_eof
+%start <Ast.replacement_token list> replacement_tokens_eof
 %type <Ast.unary_operator> unary_operator
 %type <Ast.binary_operator> binary_operator
 %left Question Colon
@@ -29,7 +30,7 @@
 %%
 
 let preprocessing_file :=
-  | ~ = group; closing_comment = EOF; {
+  | ~ = group; closing_comment = loc(EOF); {
       { group; closing_comment } : Ast.preprocessing_file
     }
 
@@ -47,7 +48,7 @@ let control_line :=
   | directive_text = Include_next; file = replacement_list; {
       { directive_text; desc = Include_next file } : Ast.control_line
     }
-  | directive_text = Define; ~ = identifier;
+  | directive_text = Define; identifier = loc(identifier);
     replacement_list = loc(replacement_list_no_lparen); {
       { directive_text;
         desc = Define {
@@ -56,8 +57,8 @@ let control_line :=
           replacement_list;
         }} : Ast.control_line
       }
-  | directive_text = Define; ~ = identifier;
-    Lparen; ~ = parameters; Rparen; ~ = replacement_list; {
+  | directive_text = Define; identifier = loc(identifier);
+    Lparen; parameters = loc(parameters); Rparen; ~ = replacement_list; {
       { directive_text;
         desc = Define {
           identifier;
@@ -145,6 +146,9 @@ let replacement_list_no_lparen :=
   | hd = loc(replacement_token_no_lparen); tl = loc(replacement_token)*; {
       hd :: tl }
   | { [] }
+
+let replacement_tokens_eof :=
+  | ~ = replacement_token*; EOF; <>
 
 let replacement_token :=
   | replacement_token_no_lparen

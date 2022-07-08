@@ -98,8 +98,10 @@ let new_line = '\n' | '\r' '\n'
 
 let pp_number_digits = digit+ ("." digit*)? | "." digit+
 
+(* in the norm (C17), identifier_nondigit is without '+' but that does not
+   include numbers with suffixer like 1ul *)
 let pp_number =
-  pp_number_digits (identifier_nondigit | ['e' 'E' 'p' 'P'] ['+' '-'])?
+  pp_number_digits (identifier_nondigit+ | ['e' 'E' 'p' 'P'] ['+' '-'])?
 
 (* A.1.1 Lexical elements *)
 

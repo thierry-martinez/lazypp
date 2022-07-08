@@ -1,5 +1,7 @@
 type t
 
+val equal : t -> t -> bool
+
 val compare : t -> t -> int
 
 val of_string : string -> t

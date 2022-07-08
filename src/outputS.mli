@@ -5,16 +5,14 @@ module type S = sig
       filename : string;
     }
 
-  type defined_desc =
-    | Ast of Ast.define Loc.t
-    | CommandLine of string
+  type defined = {
+      occurrence : Occurrence.t;
+      desc : Mark.defined_desc;
+      expandable : bool;
+    }
 
   type define =
-    | Defined of {
-        occurrence : Occurrence.t;
-        desc : defined_desc;
-        expandable : bool;
-      }
+    | Defined of defined
     | Undefined
 
   type define_map = define Identifier.Map.t
@@ -23,10 +21,15 @@ module type S = sig
       define_map : define_map;
     }
 
+  type 'a expansion_token =
+    | Mark of Mark.t
+    | Token of 'a
+
+  type replacement_token = Ast.replacement_token Loc.t expansion_token
+
   type context = {
       config : Config.t;
       expand_includes : expand_include list;
-      out_channel : out_channel option;
       expansion_status : expansion_status;
       handlers : handlers;
       next_paths : string list;
@@ -34,6 +37,7 @@ module type S = sig
 
   and handlers = {
       output_pragma :
-        context -> env -> string -> Ast.replacement_list Loc.t -> env;
+        context -> env -> string -> Ast.replacement_list Loc.t ->
+        replacement_token list;
     }
 end

@@ -17,6 +17,8 @@ let () =
       default_undefined = false;
       predefs = [];
       use_gcc_predefs = false;
+      expand_macros = [];
+      expand_all_macros = true;
     } in
   let handlers = Lazypp.Output.default_handlers in
   match LazyppTest.test_all_c_files config handlers check_file with

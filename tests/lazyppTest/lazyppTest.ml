@@ -2,6 +2,7 @@ let is_c_file filename =
   Filename.check_suffix filename ".c"
 
 let check_c_file config handlers check_file source_filename =
+  Format.eprintf "Check file %s@." source_filename;
   let target_filename = source_filename ^ ".out" in
   let env = Lazypp.compute_initial_env config handlers in
   match

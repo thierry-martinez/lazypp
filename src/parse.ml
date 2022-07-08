@@ -84,6 +84,7 @@ let channel ~filename in_channel =
           let fix_string str =
             String.sub str 1 (String.length str - 1) in
           match token with
+          | New_line str -> New_line (fix_string str)
           | Whitespace str -> Whitespace (fix_string str)
           | If str -> If (fix_string str)
           | Ifdef str -> Ifdef (fix_string str)

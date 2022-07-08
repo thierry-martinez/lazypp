@@ -15,5 +15,6 @@ val get_gcc_include_path : unit -> string list
 val compute_initial_env : Config.t -> Output.handlers -> Output.env
 
 val preprocess_file :
+  ?map_filename: string ->
   Config.t -> Output.handlers -> Output.env -> target_filename:string ->
   source_filename:string -> unit

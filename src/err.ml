@@ -23,11 +23,21 @@ let format_process_status fmt (ps : Unix.process_status) =
   | WSTOPPED signal ->
       Format.fprintf fmt "stopped %d" signal
 
+let format_invalid_short_loc fmt (error : invalid_short_loc) =
+  match error with
+  | Missing_colon ->
+      Format.fprintf fmt "missing ':'"
+  | Not_a_valid_offset offset ->
+      Format.fprintf fmt "not a valid offset '%s'" offset
+
 let format_unlocated fmt (d : unlocated) =
   match d with
   | External_command_failed { command; status } ->
       Format.fprintf fmt "Command \"%s\" failed: %a" command
         format_process_status status
+  | Invalid_short_loc { text; error } ->
+      Format.fprintf fmt "Invalid short location %s: %a"
+        text format_invalid_short_loc error
 
 let format_located fmt (d : located) =
   match d with

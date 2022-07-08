@@ -129,8 +129,8 @@ module type S = sig
     }
 
   type define = {
-      identifier : identifier;
-      parameters : parameters option;
+      identifier : identifier Loc.t;
+      parameters : parameters Loc.t option;
       replacement_list : replacement_list Loc.t;
     }
 
@@ -180,6 +180,6 @@ module type S = sig
 
   type preprocessing_file = {
       group : group;
-      closing_comment : string;
+      closing_comment : string Loc.t;
     }
 end

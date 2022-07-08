@@ -1,8 +1,16 @@
 module type S = sig
+  type invalid_short_loc =
+    | Missing_colon
+    | Not_a_valid_offset of string
+
   type unlocated =
     | External_command_failed of {
         command : string;
         status : Unix.process_status;
+      }
+    | Invalid_short_loc of {
+        text : string;
+        error : invalid_short_loc;
       }
 
   type located =

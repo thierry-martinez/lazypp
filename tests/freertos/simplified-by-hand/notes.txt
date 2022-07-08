@@ -1,0 +1,116 @@
+configUSE_TASK_NOTIFICATIONS => 0
+  (if 1, turns on task notifications)
+
+configUSE_TRACE_FACILITY => 0
+  (not sure)
+
+configUSE_STATS_FORMATTING_FUNCTIONS => 0
+  (not sure)
+
+configUSE_QUEUE_SETS => 0
+  (receiving from multiple queues)
+
+configIDLE_SHOULD_YIELD => 1
+  (idle task could be pre-empted, see handbook)
+
+configUSE_PREEMPTION => ? not sure for now
+
+configUSE_TIME_SLICING => ? not sure for now
+
+configUSE_PORT_OPTIMISED_TASK_SELECTION => 0
+  (generic method used, does not limit MAX_PRIORITIES)
+
+configUSE_POSIX_ERRNO => 1
+  (not many lines impacted)
+
+configUSE_CO_ROUTINES => 0
+
+configUSE_NEWLIB_REENTRANT => 0
+  (support for some specific "NewLib" thingy)
+
+configUSE_TICK_HOOK => 0
+  (related to a tick hook function on interruptions)
+
+configUSE_APPLICATION_TASK_TAG => 0
+  (a restricted feature)
+
+portCRITICAL_NESTING_IN_TCB => 0
+  (not clear what it is)
+
+configUSE_TIMERS => 1
+  (let tasks schedule timers)
+
+configGENERATE_RUN_TIME_STATS => 0
+  (does not seem very useful)
+
+FREERTOS_TASKSC_ADDITIONS_INIT => undefined
+configINCLUDE_FREERTOS_TASK_C_ADDITIONS_H => 0
+  (unclear)
+
+configUSE_MUTEXES => 0
+configUSE_RECURSIVE_MUTEXES => 0
+  (removes a lot of code, leaves other synchronizations)
+
+configASSERT_DEFINED => 1
+  (brings additional structure checks)
+
+portSTACK_GROWTH => -1
+  (seems the usual setting)
+
+configUSE_16BITS_TIKCS => 0
+  (using a 32 bits variable is less work)
+
+configUSE_IDLE_HOOK => 0
+  (a call back for the idle task to call, not needed here)
+configUSE_DAEMON_TASK_STARTUP_HOOK => 0
+
+configUSE_TICKLESS_IDLE => 0
+  (some low power stuff)
+
+configQUEUE_REGISTRY_SIZE => 0
+  (for some specific debugging things)
+
+configNUM_THREAD_LOCAL_STORAGE_POINTERS => 0 ???
+
+configUSE_PREEMPTION => 0
+  (collaborative scheduler)
+
+configUSE_COUNTING_SEMAPHORES => 0
+
+portREMOVE_STATIC_QUALIFIER => undefined
+FREERTOS_TASKS_C_ADDITIONS_INIT => undefined
+
+
+INCLUDE_vTaskSuspend => 1
+INCLUDE_vTaskDelay => 1
+INCLUDE_vTaskDelete => 1
+INCLUDE_vTaskPrioritySet => 1
+INCLUDE_xTaskGetHandle => 1
+INCLUDE_uxTaskPriorityGet => 1
+INCLUDE_xTimerPendFunctionCall => 0
+
+
+configSUPPORT_DYNAMIC_ALLOCATION => 1
+configSUPPORT_STATIC_ALLOCATION => 1
+tskSTATIC_AND_DYNAMIC_ALLOCATION_POSSIBLE ? => check!
+
+configCHECK_FOR_STACK_OVERFLOW => 0
+portHAS_STACK_OVERFLOW_CHECKING => 0
+
+INCLUDE_xTaskAbortDelay => 0
+
+INCLUDE_uxTaskGetStackHighWaterMark*** => 0
+tskSET_NEW_STACKS_TO_KNOWN_VALUE => 0
+
+INCLUDE_xTaskResumeFromISR => 0
+
+configNUM_THREAD_LOCAL_STORAGE_POINTERS => 0
+configRECORD_STACK_HIGH_ADDRESS => 0
+
+portUSING_MPU_WRAPPERS => 1
+tskSTATIC_AND_DYNAMIC_ALLOCATION_POSSIBLE => 1
+  (configuration, typical for an ARM processor)
+
+INCLUDE_eTaskGetState => 1
+
+configUSE_LIST_DATA_INTEGRITY_CHECK_BYTES => 0

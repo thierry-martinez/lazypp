@@ -4,6 +4,9 @@ module Self = struct
       value : string;
     }
 
+  let equal ident ident' =
+    ident.index = ident'.index
+
   let compare ident ident' =
     Int.compare ident.index ident'.index
 end

@@ -6,11 +6,6 @@ module rec S : OutputS.S = S
 
 include S
 
-let output_string_opt (out_channel : out_channel option) s =
-  match out_channel with
-  | None -> ()
-  | Some out_channel -> output_string out_channel s
-
 module ExpansionContext = struct
   type t = {
       set : Occurrence.Set.t;
@@ -31,70 +26,79 @@ module ExpansionContext = struct
     List.rev context.list
 end
 
-type replacement_token = {
-    expansion_context : ExpansionContext.t;
-    token : Ast.replacement_token Loc.t;
+type replacement_token_context = {
+    context : ExpansionContext.t;
+    token : replacement_token;
   }
 
-let rec extract_arguments_rec list_range lvl args_accu
-    current_arg_begin_loc current_arg_accu
-    (list : replacement_token list) =
-  match list with
-  | [] -> Err.raise_located ~range:list_range Rparen_expected
-  | { token = hd; _ } :: tl ->
-      let push_current_arg () =
-        let current_arg : Ast.replacement_list Loc.t =
-          { range = { hd.range with
-              start = current_arg_begin_loc; end_ = hd.range.start };
-            v = Ast.remove_whitespace (List.rev current_arg_accu) } in
-        current_arg :: args_accu in
-      begin match hd.v with
-      | Lparen ->
-          extract_arguments_rec list_range (succ lvl) args_accu
-            current_arg_begin_loc (hd :: current_arg_accu) tl
-      | Comma when lvl = 0 ->
-          extract_arguments_rec list_range lvl (push_current_arg ())
-            hd.range.end_ [] tl
-      | Rparen ->
-          if lvl = 0 then
-            begin match current_arg_accu, args_accu with
-            | [], [] -> [], tl
-            | _ -> List.rev (push_current_arg ()), tl
-            end
-          else
-            extract_arguments_rec list_range (pred lvl) args_accu
-              current_arg_begin_loc (hd :: current_arg_accu) tl
-      | _ ->
-          extract_arguments_rec list_range lvl args_accu
-            current_arg_begin_loc (hd :: current_arg_accu) tl
-      end
-
-let rec skip_whitespace (replacement_list : replacement_token list) =
+let rec skip_whitespace (replacement_list : replacement_token_context list) =
   match replacement_list with
-  | { token = { v = Whitespace _ ; _ }; _ } :: tl -> skip_whitespace tl
+  | { token = (Mark _ | Token { v = Whitespace _; _ }); _ } :: tl ->
+      skip_whitespace tl
   | _ -> replacement_list
 
-let extract_arguments list_range (list : replacement_token list) =
+let remove_whitespace list =
+  list |> List.filter (fun (token : replacement_token_context) ->
+    match token.token with
+    | Token { v = Whitespace _; _ } -> false
+    | _ -> true)
+
+let rec extract_arguments_rec list_range lvl args_accu
+    current_arg_accu
+    (list : replacement_token_context list) =
+  match list with
+  | [] -> Err.raise_located ~range:list_range Rparen_expected
+  | hd :: tl ->
+      match hd.token with
+      | Mark _ ->
+          extract_arguments_rec list_range lvl args_accu
+            (hd :: current_arg_accu) tl
+      | Token token ->
+          let push_current_arg () =
+            let current_arg : replacement_token list =
+              List.map (fun token -> token.token)
+                (remove_whitespace (List.rev current_arg_accu)) in
+            current_arg :: args_accu in
+          begin match token.v with
+          | Lparen ->
+              extract_arguments_rec list_range (succ lvl) args_accu
+                (hd :: current_arg_accu) tl
+          | Comma when lvl = 0 ->
+              extract_arguments_rec list_range lvl (push_current_arg ())
+                [] tl
+          | Rparen ->
+              if lvl = 0 then
+                begin match current_arg_accu, args_accu with
+                | [], [] -> [], tl
+                | _ -> List.rev (push_current_arg ()), tl
+                end
+              else
+                extract_arguments_rec list_range (pred lvl) args_accu
+                  (hd :: current_arg_accu) tl
+          | _ ->
+              extract_arguments_rec list_range lvl args_accu
+                (hd :: current_arg_accu) tl
+          end
+
+let extract_arguments list_range (list : replacement_token_context list) =
   match skip_whitespace list with
-  | { token = { v = Lparen; range }; _ } :: tl ->
-      Some (extract_arguments_rec list_range 0 [] range.end_ [] tl)
+  | { token = Token { v = Lparen; _ }; _ } :: tl ->
+      Some (extract_arguments_rec list_range 0 [] [] tl)
   | _ -> None
 
-type argument_map = Ast.replacement_list Loc.t Identifier.Map.t
+type argument_map = replacement_token list Identifier.Map.t
 
 let bind_parameter (argument_map : argument_map)
-      (parameter : Ast.parameter) (argument : Ast.replacement_list Loc.t) =
-  Identifier.Map.add parameter.identifier.v
-    (Loc.l ~range:parameter.identifier.range argument.v)
-    argument_map
+      (parameter : Ast.parameter) (argument : replacement_token list) =
+  Identifier.Map.add parameter.identifier.v argument argument_map
 
 let bind_parameters ~range expansion_context macro
       parameters arguments : argument_map =
   let expected_argument_count = List.length parameters in
   let given_argument_count = List.length arguments in
-  let arguments : Ast.replacement_list Loc.t list =
+  let arguments : replacement_token list list =
     match expected_argument_count, given_argument_count with
-    | 1, 0 -> [{ range; v = [] }]
+    | 1, 0 -> []
     | _ ->
         if expected_argument_count <> given_argument_count then
           Err.raise_located ~range (Wrong_argument_count {
@@ -104,29 +108,33 @@ let bind_parameters ~range expansion_context macro
         arguments in
   List.fold_left2 bind_parameter Identifier.Map.empty parameters arguments
 
-let make_token_list expansion_context
-      (list : Ast.replacement_token Loc.t list) :
-      replacement_token list =
-  List.map (fun token -> { expansion_context; token }) list
+let make_token_list context (list : Ast.replacement_token Loc.t list) :
+      replacement_token_context list =
+  list |> List.map (fun (token : Ast.replacement_token Loc.t) ->
+    { context; token = Token token })
 
 type substitute_token =
   | Placeholder
   | Token of Ast.replacement_token Loc.t
 
+let replacement_tokens_of_string s : Ast.replacement_token list option =
+  let lexbuf = Lexing.from_string s in
+  try
+    Some (Parser.replacement_tokens_eof Lexer.preprocessing_token lexbuf)
+  with Parser.Error ->
+    None
+
 let concat_token range (lhs : Ast.replacement_token)
       (rhs : Ast.replacement_token) :
   Ast.replacement_token =
-  match lhs, rhs with
-  | Whitespace _, token
-  | token, Whitespace _ -> token
-  | Identifier lhs, Identifier rhs ->
-      Identifier (Identifier.of_string (Identifier.to_string lhs ^
-        Identifier.to_string rhs))
+  let lhs' = Ast.string_of_replacement_token ~preserve_whitespace:true lhs in
+  let rhs' = Ast.string_of_replacement_token ~preserve_whitespace:true rhs in
+  let s = lhs' ^ rhs' in
+  let lexbuf = Lexing.from_string s in
+  match replacement_tokens_of_string s with
+  | Some [token] -> token
   | _ ->
-      Warn.signal ~range (Unimplemented (Format.asprintf
-        "concatenation between '%s' and '%s'"
-        (Ast.string_of_replacement_token ~preserve_whitespace:true lhs)
-        (Ast.string_of_replacement_token ~preserve_whitespace:true rhs)));
+      Warn.signal ~range (Invalid_token_concatenation { lhs; rhs });
       Whitespace ""
 
 let concat_substitute_token lhs rhs =
@@ -146,6 +154,12 @@ let rec concat_hash_hash accu rev_list =
   | Placeholder :: tl -> concat_hash_hash accu tl
   | Token token :: tl -> concat_hash_hash (Token token :: accu) tl
 
+let remove_marks replacement_list =
+  replacement_list |> List.filter_map (fun token ->
+    match token with
+    | Mark _ -> None
+    | Token token -> Some token)
+
 let rec substitute_arguments_rec
     (argument_map : argument_map) (accu : substitute_token list)
     (replacement_list : Ast.replacement_token Loc.t list) =
@@ -163,26 +177,31 @@ let rec substitute_arguments_rec
               substitute_arguments_rec argument_map (Token hd :: accu) tl
           | replacement_list' ->
               let replacement =
-                match replacement_list'.v with
+                match remove_marks replacement_list' with
                 | [] -> [Placeholder]
-                | list -> List.map (fun token -> Token token) list in
+                | list ->
+                    list |> List.map
+                      (fun (token : Ast.replacement_token Loc.t) ->
+                        Token token) in
               substitute_arguments_rec argument_map
                 (List.rev_append replacement accu) tl
           end
       | Hash ->
-          let error_case () =
-            Err.raise_located ~range:hd.range Hash_not_followed_by_parameter in
           begin match Ast.skip_whitespace tl with
           | { v = Identifier identifier; range } :: tl ->
               begin match Identifier.Map.find identifier argument_map with
-              | exception Not_found -> error_case ()
+              | exception Not_found ->
+                  Err.raise_located ~range Hash_not_followed_by_parameter
               | replacement_list ->
-                  let s = Ast.string_of_replacement_list replacement_list.v in
-                  substitute_arguments_rec argument_map
-                    (Token { range; v = String_literal (Warn.quote s) } :: accu)
-                    tl
+                  let s =
+                    Ast.string_of_replacement_list
+                      (remove_marks replacement_list) in
+                  let token =
+                    Token { range; v = String_literal (Warn.quote s) } in
+                  substitute_arguments_rec argument_map (token :: accu) tl
               end
-          | _ -> error_case ()
+          | _ ->
+              Err.raise_located ~range:hd.range Hash_not_followed_by_parameter
           end
       | _ ->
           substitute_arguments_rec argument_map (Token hd :: accu) tl
@@ -194,87 +213,130 @@ let substitute_arguments ~range expansion_context macro parameters arguments
     bind_parameters ~range expansion_context macro parameters arguments in
   substitute_arguments_rec argument_map [] replacement_list
 
-let rec replace_macros_rec list_range (context : context) (env : env)
-      accu expanded (list : replacement_token list) :
-      replacement_token list * bool =
+let match_short_loc (short_loc : Config.short_loc) (range : Loc.range) =
+  short_loc.filename = SourceFile.filename range.file &&
+  short_loc.offset = range.start.offset
+
+let match_macro (identifier : Identifier.t)
+      (token : Ast.replacement_token Loc.t)
+      (defined : defined) (macro : Config.macro) =
+  match macro with
+  | Name name -> Identifier.equal name identifier
+  | Loc_def short_loc ->
+      begin match defined.desc with
+      | Ast ast -> match_short_loc short_loc ast.v.identifier.range
+      | Command_line _ -> false
+      end
+  | Loc_invocation short_loc ->
+      match_short_loc short_loc token.range
+
+let is_defined_expandable (context : context) (identifier : Identifier.t)
+      (token : Ast.replacement_token Loc.t) (defined : defined) =
+  defined.expandable || context.config.expand_all_macros ||
+    List.exists (match_macro identifier token defined)
+      context.config.expand_macros
+
+let put_mark context kind list =
+  let id = Mark.Id.fresh () in
+  { context; token = Mark (Begin { kind; id }) } ::
+  list @
+  [{ context; token = Mark (End { id }) }]
+
+let rec replace_macros_rec ~(force_expansion : bool) list_range
+      (context : context) (env : env)
+      accu ~(expanded : bool) (list : replacement_token_context list) :
+      replacement_token_context list * bool =
   match list with
   | [] -> List.rev accu, expanded
   | hd :: tl ->
-      let keep_token () =
-        replace_macros_rec list_range context env (hd :: accu) expanded tl in
-      match hd.token.v with
-      | Identifier identifier ->
-          begin match Identifier.Map.find identifier env.define_map with
-          | exception Not_found | Undefined -> keep_token ()
-          | Defined define ->
-              if define.expandable &&
-                   not (ExpansionContext.mem define.occurrence
-                     hd.expansion_context) then
-                begin match define.desc with
-                | CommandLine value ->
-                    output_string_opt context.out_channel value;
-                    [], true
-                | Ast { v = ast; _ } ->
-                    begin match ast.parameters with
-                    | None ->
+      match hd.token with
+      | Mark _ ->
+          replace_macros_rec ~force_expansion list_range context env
+            (hd :: accu) ~expanded tl
+      | Token token ->
+          let rec_call ~expanded accu tl =
+            replace_macros_rec ~force_expansion list_range context env
+              accu ~expanded tl in
+          let keep_token () =
+            rec_call ~expanded (hd :: accu) tl in
+          match token.v with
+          | Identifier identifier ->
+              begin match Identifier.Map.find identifier env.define_map with
+              | exception Not_found | Undefined -> keep_token ()
+              | Defined define ->
+                  if (force_expansion ||
+                       is_defined_expandable context identifier token define) &&
+                       not (ExpansionContext.mem define.occurrence
+                         hd.context) then
+                    let expansion =
+                      match define.desc with
+                      | Command_line tokens ->
+                          let context =
+                            ExpansionContext.add define.occurrence hd.context in
+                          let tokens =
+                            tokens |> List.map (fun v ->
+                              { context;
+                                token = Token { v; range = token.range }}) in
+                          Some (context, tokens, tl)
+                      | Ast { v = ast; _ } ->
+                          begin match ast.parameters with
+                          | None ->
+                              let list =
+                                Ast.remove_whitespace ast.replacement_list.v in
+                              let expansion_context =
+                                ExpansionContext.add define.occurrence
+                                  hd.context in
+                              let list =
+                                make_token_list expansion_context list in
+                              Some (expansion_context, list, tl)
+                          | Some parameters ->
+                              begin match extract_arguments list_range tl with
+                              | None -> None
+                              | Some (arguments, tl) ->
+                                  let list =
+                                    substitute_arguments ~range:list_range
+                                      hd.context define.occurrence
+                                      parameters.v.list arguments
+                                      (Ast.remove_whitespace
+                                        ast.replacement_list.v) in
+                                  let expansion_context =
+                                    ExpansionContext.add define.occurrence
+                                      hd.context in
+                                  let list =
+                                    make_token_list expansion_context list in
+                                  Some (expansion_context, list, tl)
+                              end
+                          end in
+                    begin match expansion with
+                    | None -> keep_token ()
+                    | Some (expansion_context, list, tl) ->
                         let list =
-                          Ast.remove_whitespace ast.replacement_list.v in
-                        let expansion_context =
-                          ExpansionContext.add define.occurrence
-                            hd.expansion_context in
-                        let list = make_token_list expansion_context list in
-                        let accu = List.rev_append list accu in
-                        replace_macros_rec list_range context env accu true tl
-                    | Some parameters ->
-                        begin match extract_arguments list_range tl with
-                        | None -> keep_token ()
-                        | Some (arguments, tl) ->
-                            let list =
-                              substitute_arguments ~range:list_range
-                                hd.expansion_context define.occurrence
-                                parameters.list arguments
-                                (Ast.remove_whitespace
-                                  ast.replacement_list.v) in
-                            let expansion_context =
-                              ExpansionContext.add define.occurrence
-                                hd.expansion_context in
-                            let list = make_token_list expansion_context list in
-                            let accu = List.rev_append list accu in
-                            replace_macros_rec list_range context env accu true
-                              tl
-                        end
+                          put_mark expansion_context
+                            (Macro_expansion define.desc) list in
+                        rec_call ~expanded:true (List.rev_append list accu) tl
                     end
-                end
-              else
-                keep_token ()
-          end
-      | _ -> keep_token ()
+                  else
+                    let list =
+                      put_mark hd.context (Macro_reference define.desc) [hd] in
+                    rec_call ~expanded (List.rev_append list accu) tl
+              end
+          | _ -> keep_token ()
 
-and replace_macros list_range (context : context) (env : env)
-      (list : replacement_token list) : replacement_token list =
+and replace_macros ~force_expansion list_range (context : context) (env : env)
+      (list : replacement_token_context list) : replacement_token_context list =
   let list', expanded =
-    replace_macros_rec list_range context env [] false list in
+    replace_macros_rec ~force_expansion list_range context env []
+      ~expanded:false list in
   if expanded then
-    replace_macros list_range context env list'
+    replace_macros ~force_expansion list_range context env list'
   else
-    list
-
-let output_token channel (token : replacement_token) =
-  output_string_opt channel
-    (Ast.string_of_replacement_token ~preserve_whitespace:true token.token.v)
+    list'
 
 let output_replacement_list (context : context) (env : env)
-      (list : Ast.replacement_list Loc.t) : unit =
-  let list =
-    replace_macros list.range context env
-      (make_token_list ExpansionContext.empty list.v) in
-  List.iter (output_token context.out_channel) list
-
-let remove_whitespace list =
-  list |> List.filter (fun (token : replacement_token) ->
-    match token.token.v with
-    | Whitespace _ -> false
-    | _ -> true)
+      (list : Ast.replacement_list Loc.t) : replacement_token list =
+  List.map (fun token -> token.token)
+    (replace_macros ~force_expansion:false list.range context env
+      (make_token_list ExpansionContext.empty list.v))
 
 let is_defined ~default_undefined identifier define_map =
   match Identifier.Map.find identifier define_map with
@@ -482,9 +544,10 @@ let evaluate_condition context env (condition : Ast.replacement_list Loc.t) =
   let list =
     make_token_list ExpansionContext.empty (replace_defined condition.v) in
   let list =
-    remove_whitespace (replace_macros condition.range context env list) in
+    remove_whitespace
+      (replace_macros ~force_expansion:true condition.range context env list) in
   let list =
-    List.map (fun (token : replacement_token) -> token.token) list in
+    remove_marks (List.map (fun token -> token.token) list) in
   let tokens = Queue.of_seq (List.to_seq list) in
   let lexbuf = Lexing.from_string "" in
   let pop_token (lexbuf : Lexing.lexbuf) =
@@ -530,15 +593,21 @@ let evaluate_if_condition context env (condition : Ast.if_condition_kind) =
           ~default_undefined:context.config.default_undefined identifier
           env.define_map))
 
-let output_if_condition context env (condition : Ast.if_condition) =
-  output_string_opt context.out_channel condition.directive_text;
-  begin match condition.kind with
+let output_whitespace range (whitespace : string list) =
+  whitespace |> List.map (fun s : replacement_token ->
+    Token { range; v = Whitespace s })
+
+let output_if_condition context env (condition : Ast.if_condition Loc.t) :
+    replacement_token list =
+  begin match condition.v.kind with
   | If list ->
+      Token { range = condition.range; v = Other condition.v.directive_text } ::
       output_replacement_list context env list
   | Ifdef { identifier; whitespace }
   | Ifndef { identifier; whitespace } ->
-      output_string_opt context.out_channel (Identifier.to_string identifier);
-      whitespace |> List.iter (output_string_opt context.out_channel)
+      Token { range = condition.range; v = Other condition.v.directive_text } ::
+      Token { range = condition.range; v = Identifier identifier } ::
+      output_whitespace condition.range whitespace
   end
 
 type include_filename = {
@@ -557,21 +626,21 @@ let lower_expansion_status context expansion_status =
     min_expansion_status context.expansion_status expansion_status in
   { context with expansion_status }
 
-let concat_replacement_token_list (list : replacement_token list) =
+let concat_replacement_token_list (list : Ast.replacement_list) =
   String.concat "" (List.map
-    (fun (token : replacement_token) ->
-      Ast.string_of_replacement_token ~preserve_whitespace:true token.token.v)
+    (fun (token : Ast.replacement_token Loc.t) ->
+      Ast.string_of_replacement_token ~preserve_whitespace:true token.v)
     list)
 
-let rec parse_include_filename_tail range accu (list : replacement_token list) =
+let rec parse_include_filename_tail range accu (list : Ast.replacement_list) =
   match list with
-  | { token = { v = Greater; _ }; _ } :: tail ->
+  | { v = Greater; _ } :: tail ->
       begin match tail with
       | [] ->
           let filename = concat_replacement_token_list (List.rev accu) in
           { filename; search_in_current_directory = false }
       | head :: _ ->
-          Err.raise_located ~range:head.token.range Unexpected_token_after_greater
+          Err.raise_located ~range:head.range Unexpected_token_after_greater
       end
   | head :: tail ->
       parse_include_filename_tail range (head :: accu) tail
@@ -617,12 +686,12 @@ let simple_unquote_string filename =
   assert (filename.[0] = '"' && filename.[String.length filename - 1] = '"');
   String.sub filename 1 (String.length filename - 2)
 
-let parse_include_filename range (list : replacement_token list) =
-  match list with
-  | [{ token = { v = String_literal filename; _ }; _ }] ->
+let parse_include_filename range (list : replacement_token_context list) =
+  match remove_marks (List.map (fun token -> token.token) list) with
+  | [{ v = String_literal filename; _ }] ->
       Some ({ filename = simple_unquote_string filename;
         search_in_current_directory = true })
-  | { token = { v = Less; _ }; _ } :: tail ->
+  | { v = Less; _ } :: tail ->
       Some (parse_include_filename_tail range [] tail)
   | _ ->
       None
@@ -643,114 +712,129 @@ let rec search_file paths filename =
         search_file next_paths filename
 
 let signal_message context env constructor directive_text
-      (message : Ast.replacement_token Loc.t list Loc.t) =
+      (message : Ast.replacement_token Loc.t list Loc.t) :
+      replacement_token list =
   if context.expansion_status = Certain then
     begin
       let list = make_token_list ExpansionContext.empty message.v in
       let message_str =
         Ast.string_of_replacement_list
-          (List.map (fun token -> token.token) list) in
+          (remove_marks (List.map (fun token -> token.token) list)) in
       Warn.signal ~range:message.range (constructor message_str);
     end;
-  output_string_opt context.out_channel directive_text;
+  Token { range = message.range; v = Other directive_text } ::
   output_replacement_list context env message
 
-let output_dot_dot_dot out_channel (dot_dot_dot : Ast.dot_dot_dot) =
-  List.iter (output_string out_channel) dot_dot_dot.before;
-  output_string out_channel "...";
-  List.iter (output_string out_channel) dot_dot_dot.after
+let output_dot_dot_dot range (dot_dot_dot : Ast.dot_dot_dot) :
+      replacement_token list =
+  output_whitespace range dot_dot_dot.before @
+  Token { range; v = Dot_dot_dot } ::
+  output_whitespace range dot_dot_dot.after
 
-let output_define_parameter out_channel (parameter : Ast.parameter) =
-  List.iter (output_string out_channel) parameter.before;
-  output_string out_channel (Identifier.to_string parameter.identifier.v);
-  List.iter (output_string out_channel) parameter.after
+let output_define_parameter (parameter : Ast.parameter) :
+      replacement_token list =
+  let range = parameter.identifier.range in
+  output_whitespace range parameter.before @
+  Token { range; v = Identifier parameter.identifier.v } ::
+  output_whitespace range parameter.after
 
-let output_define_parameter_comma out_channel (parameter : Ast.parameter) =
-  output_string out_channel ",";
-  output_define_parameter out_channel parameter
+let output_define_parameter_comma (parameter : Ast.parameter) :
+      replacement_token list =
+  let range = parameter.identifier.range in
+  Token { range; v = Comma } ::
+  output_define_parameter parameter
 
-let output_define_pararameters out_channel (parameters : Ast.parameters) =
-  output_string out_channel "(";
-  begin match parameters.list with
+let output_define_pararameters (parameters : Ast.parameters Loc.t) :
+      replacement_token list =
+  let range = parameters.range in
+  (Token { range; v = Lparen } : replacement_token) ::
+  begin match parameters.v.list with
   | [] ->
-      begin match parameters.dot_dot_dot with
-      | None -> ()
-      | Some dot_dot_dot -> output_dot_dot_dot out_channel dot_dot_dot
+      begin match parameters.v.dot_dot_dot with
+      | None -> []
+      | Some dot_dot_dot -> output_dot_dot_dot range dot_dot_dot
       end
   | hd :: tl ->
-      output_define_parameter out_channel hd;
-      List.iter (output_define_parameter_comma out_channel) tl;
-      begin match parameters.dot_dot_dot with
-      | None -> ()
+      output_define_parameter hd @
+      List.concat_map output_define_parameter_comma tl @
+      begin match parameters.v.dot_dot_dot with
+      | None -> []
       | Some dot_dot_dot ->
-          output_string out_channel ",";
-          output_dot_dot_dot out_channel dot_dot_dot
+          Token { range; v = Comma } ::
+          output_dot_dot_dot range dot_dot_dot
       end
-  end;
-  output_string out_channel ")"
+  end @
+  [Token { range; v = Rparen }]
 
-let output_pragma context env directive_text payload =
-  output_string_opt context.out_channel directive_text;
-  output_replacement_list context env payload;
-  env
+let output_pragma context env directive_text
+      (payload : Ast.replacement_list Loc.t) :
+      replacement_token list =
+  Token { range = payload.range; v = Other directive_text } ::
+  output_replacement_list context env payload
 
 let default_handlers = { output_pragma }
 
-let output_define context env directive_text (define : Ast.define) out_channel =
-  output_string out_channel directive_text;
-  output_string out_channel (Identifier.to_string define.identifier);
-  Option.iter (output_define_pararameters out_channel) define.parameters;
+let output_define context env directive_text (define : Ast.define) :
+      replacement_token list =
+  let range = define.identifier.range in
+  (Token { range; v = Other directive_text } : replacement_token) ::
+  Token { range; v = Identifier define.identifier.v } ::
+    begin match define.parameters with
+    | None -> []
+    | Some parameters -> output_define_pararameters parameters
+    end @
   output_replacement_list context env define.replacement_list
 
-let output_undef directive_text identifier whitespace out_channel =
-  output_string out_channel directive_text;
-  output_string out_channel (Identifier.to_string identifier);
-  List.iter (output_string out_channel) whitespace
+let output_undef range directive_text identifier whitespace :
+      replacement_token list =
+  (Token { range; v = Other directive_text } : replacement_token) ::
+  Token { range; v = Identifier identifier } ::
+  output_whitespace range whitespace
 
 let rec output_control_line context (env : env) ~(range : Loc.range)
-      (line : Ast.control_line) : env =
+      (line : Ast.control_line) : env * replacement_token list =
   match line.desc with
   | Include file ->
       output_include context env range line.directive_text file ~next:false
   | Include_next file ->
       output_include context env range line.directive_text file ~next:true
   | Define define ->
-      Option.iter (output_define context env line.directive_text define)
-        context.out_channel;
       if debug_directives then
-        Format.eprintf "#define %a@." Identifier.format define.identifier;
+        Format.eprintf "#define %a@." Identifier.format define.identifier.v;
       let define_map =
-        Identifier.Map.add define.identifier
-          (Defined { desc = Ast { range; v = define }; expandable = true;
-            occurrence = Occurrence.fresh define.identifier ~range })
+        Identifier.Map.add define.identifier.v
+          (Defined { desc = Ast { range; v = define }; expandable = false;
+            occurrence = Occurrence.fresh define.identifier.v ~range })
           env.define_map in
-      { define_map }
+      { define_map }, output_define context env line.directive_text define
   | Undef { identifier; whitespace } ->
-      Option.iter (output_undef line.directive_text identifier whitespace)
-        context.out_channel;
-      { define_map = Identifier.Map.add identifier Undefined env.define_map }
+      { define_map = Identifier.Map.add identifier Undefined env.define_map },
+      output_undef range line.directive_text identifier whitespace
   | Error message ->
-      signal_message context env (fun message -> User_error message)
-        line.directive_text message;
-      env
+      env, signal_message context env (fun message -> User_error message)
+        line.directive_text message
   | Warning message ->
-      signal_message context env (fun message -> User_warning message)
-        line.directive_text message;
-      env
+      env, signal_message context env (fun message -> User_warning message)
+        line.directive_text message
   | Pragma payload ->
+      env,
       context.handlers.output_pragma context env line.directive_text payload
 
 and output_include ~next (context : context) (env : env)
     (range : Loc.range) directive_text
-    (file : Ast.replacement_list Loc.t) : env =
+    (file : Ast.replacement_list Loc.t) : env * replacement_token list =
   let list = make_token_list ExpansionContext.empty file.v in
-  let list = remove_whitespace (replace_macros file.range context env list) in
-  let keep_include, env =
+  let list =
+    remove_whitespace
+      (replace_macros ~force_expansion:true file.range context env list) in
+  let env, output =
     match parse_include_filename range list with
     | None ->
+        let expression =
+          remove_marks (List.map (fun token -> token.token) list) in
         Warn.signal ~range (Include_not_followed_by_string_literal_or_less
-          { expression = List.map (fun token -> token.token) list });
-        true, env
+          { expression });
+        env, None
     | Some { filename; search_in_current_directory } ->
         let paths =
           if next then
@@ -763,40 +847,43 @@ and output_include ~next (context : context) (env : env)
           | None ->
               if context.expansion_status = Certain then
                 Warn.signal ~range (File_not_found { paths; filename });
-              true, env
+              env, None
           | Some { full_filename; next_paths } ->
               let ast = Parse.file full_filename in
               let context = { context with next_paths } in
-              let keep_include, context =
+              let keep_include =
                 if List.exists
                      (fun (expand : expand_include) ->
                        expand.filename = full_filename)
                      context.expand_includes then
-                  false, context
+                  false
                 else
-                  true, { context with out_channel = None } in
-              let env = output_preprocessing_file context env ast in
-              keep_include, env in
-  if keep_include then
-    begin
-      output_string_opt context.out_channel directive_text;
-      output_replacement_list context env file
-    end;
-  env
+                  true in
+              let env, output = output_preprocessing_file context env ast in
+              env, if keep_include then None else Some output in
+  let output : replacement_token list =
+    match output with
+    | None ->
+        Token { range; v = Other directive_text } ::
+        output_replacement_list context env file
+    | Some output -> output in
+  env, output
 
-and output_group (context : context) (env : env) (group : Ast.group) : env =
-  List.fold_left (output_group_part context) env group
+and output_group (context : context) (env : env) (group : Ast.group)
+    : env * replacement_token list =
+  List.fold_left (fun (env, output) part ->
+    let env, output' = output_group_part context env part in
+    env, output @ output') (env, []) group
 
 and output_group_part (context : context) (env : env)
-    (group_part : Ast.group_part Loc.t) : env =
+    (group_part : Ast.group_part Loc.t) : env * replacement_token list =
   match group_part.v with
   | If_section if_section ->
       output_if_section context env if_section
   | Control_line line ->
       output_control_line context env ~range:group_part.range line
   | Text_line list ->
-      output_replacement_list context env list;
-      env
+      env, output_replacement_list context env list
 
 and output_if_section context env if_section =
   match
@@ -811,17 +898,21 @@ and output_if_section context env if_section =
         Warn.signal ~range:if_section.if_group.condition.range
           (Cannot_evaluate_condition evaluate_condition_error);
       let sub_context = lower_expansion_status context Maybe in
-      output_if_condition context env if_section.if_group.condition.v;
-      let _env = output_group sub_context env if_section.if_group.group in
-      output_else sub_context env if_section.elif_groups if_section.else_group;
-      output_string_opt context.out_channel if_section.endif;
-      env
+      let a = output_if_condition context env if_section.if_group.condition in
+      let _env, b = output_group sub_context env if_section.if_group.group in
+      let c =
+        output_else sub_context env if_section.if_group.condition.range
+          if_section.elif_groups if_section.else_group in
+      let d : replacement_token list =
+        [Token { range = if_section.if_group.condition.range;
+          v = Other if_section.endif }] in
+      env, a @ b @ c @ d
 
 and promote_else context env elif_groups else_group =
   match elif_groups with
   | [] ->
       begin match else_group with
-      | None -> env
+      | None -> env, []
       | Some else_group -> output_group context env else_group.group
       end
   | hd :: tl ->
@@ -835,30 +926,35 @@ and promote_else context env elif_groups else_group =
             Warn.signal ~range:hd.condition.range
               (Cannot_evaluate_condition evaluate_condition_error);
           let sub_context = lower_expansion_status context Maybe in
-          output_replacement_list context env hd.condition;
-          let _env = output_group sub_context env hd.group in
-          output_else sub_context env tl else_group;
-          env
+          let a = output_replacement_list context env hd.condition in
+          let _env, b = output_group sub_context env hd.group in
+          let c =
+            output_else sub_context env hd.condition.range tl else_group in
+          env, a @ b @ c
       end
 
-and output_else context env (elif_groups : Ast.elif_group list) else_group =
+and output_else context env range (elif_groups : Ast.elif_group list)
+    else_group =
   match elif_groups with
   | [] ->
       begin match else_group with
-      | None -> ()
+      | None -> []
       | Some else_group ->
-          output_string_opt context.out_channel else_group.directive_text;
-          let _env = output_group context env else_group.group in
-          ()
+          let a : replacement_token list =
+            [Token { range; v = Other else_group.directive_text }] in
+          let _env, b = output_group context env else_group.group in
+          a @ b
       end
   | hd :: tl ->
-      output_string_opt context.out_channel hd.directive_text;
-      output_replacement_list context env hd.condition;
-      let _env = output_group context env hd.group in
-      output_else context env tl else_group
+      let a : replacement_token list =
+        [Token { range; v = Other hd.directive_text }] in
+      let b = output_replacement_list context env hd.condition in
+      let _env, c = output_group context env hd.group in
+      let d = output_else context env range tl else_group in
+      a @ b @ c @ d
 
 and output_preprocessing_file (context : context) (env : env)
-      (file : Ast.preprocessing_file) : env =
-  let env = output_group context env file.group in
-  output_string_opt context.out_channel file.closing_comment;
-  env
+      (file : Ast.preprocessing_file) : env * replacement_token list =
+  let env, output = output_group context env file.group in
+  env, output @ [Token { range = file.closing_comment.range;
+    v = Other file.closing_comment.v }]
